@@ -22,15 +22,13 @@ import org.xtreemfs.common.config.ServiceConfig;
  */
 public class OSDConfig extends ServiceConfig {
 
-
     /*
      * @formatter:off
-     */
-    private final Parameter[] osdParameter = {            
-            Parameter.DEBUG_LEVEL,
+     */ 
+    private final Parameter[] osdParameter     = { 
+            Parameter.DEBUG_LEVEL, 
             Parameter.DEBUG_CATEGORIES,
-            Parameter.PORT,
-            Parameter.HTTP_PORT,
+            Parameter.PORT, Parameter.HTTP_PORT,
             Parameter.LISTEN_ADDRESS,
             Parameter.HOSTNAME,
             Parameter.DIRECTORY_SERVICE,
@@ -79,10 +77,12 @@ public class OSDConfig extends ServiceConfig {
             Parameter.VIVALDI_TIMER_INTERVAL_IN_MS,
             Parameter.STORAGE_THREADS,
             Parameter.USE_RENEWAL_SIGNAL,
-            Parameter.USE_MULTIHOMING
-    };
+            Parameter.USE_MULTIHOMING,
+
+            // TODO TEST
+            Parameter.OSD_TRACING, Parameter.OSD_TRACING_Q_Capacity };
     /*
-     * @formatter:on   
+     * @formatter:on
      */
     public static final int           CHECKSUM_NONE    = 0;
 
@@ -229,8 +229,7 @@ public class OSDConfig extends ServiceConfig {
     }
 
     /**
-     * Set default values according to the value in {@link Parameter} for all configuration parameter which
-     * are null.
+     * Set default values according to the value in {@link Parameter} for all configuration parameter which are null.
      */
     public void setDefaults() {
         super.setDefaults(osdParameter);
@@ -252,6 +251,7 @@ public class OSDConfig extends ServiceConfig {
         return (Integer) parameter.get(Parameter.MAX_REQUEST_QUEUE_LENGTH);
     }
 
+    @Override
     public HashMap<String, String> toHashMap() {
         HashMap<String, String> hm = super.toHashMap();
         hm.putAll(customParams);
@@ -285,4 +285,4 @@ public class OSDConfig extends ServiceConfig {
     public int getStorageThreads() {
         return (Integer) parameter.get(Parameter.STORAGE_THREADS);
     }
-}
+    }
