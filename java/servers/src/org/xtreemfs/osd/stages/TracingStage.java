@@ -16,24 +16,24 @@ import org.xtreemfs.common.libxtreemfs.ClientFactory;
 import org.xtreemfs.common.libxtreemfs.FileHandle;
 import org.xtreemfs.common.libxtreemfs.Options;
 import org.xtreemfs.common.libxtreemfs.Volume;
-import org.xtreemfs.common.libxtreemfs.exceptions.AddressToUUIDNotFoundException;
-import org.xtreemfs.common.libxtreemfs.exceptions.PosixErrorException;
-import org.xtreemfs.foundation.TimeSync;
+import org.xtreemfs.common.libxtreemfs.exceptions.VolumeNotFoundException;
 import org.xtreemfs.foundation.logging.Logging;
 import org.xtreemfs.foundation.logging.Logging.Category;
 import org.xtreemfs.foundation.pbrpc.client.RPCAuthentication;
 import org.xtreemfs.foundation.pbrpc.generatedinterfaces.RPC.UserCredentials;
+import org.xtreemfs.osd.NopTracingPolicyImpl;
+import org.xtreemfs.osd.OSDConfig;
 import org.xtreemfs.osd.OSDRequest;
 import org.xtreemfs.osd.OSDRequestDispatcher;
+import org.xtreemfs.osd.TracingPolicy;
+import org.xtreemfs.osd.TracingPolicyContainer;
 import org.xtreemfs.osd.operations.OSDOperation;
 import org.xtreemfs.osd.operations.ReadOperation;
 import org.xtreemfs.osd.operations.TruncateOperation;
 import org.xtreemfs.osd.operations.WriteOperation;
+import org.xtreemfs.osd.stages.TraceContainer.Operation;
 import org.xtreemfs.pbrpc.generatedinterfaces.GlobalTypes.SYSTEM_V_FCNTL;
 import org.xtreemfs.pbrpc.generatedinterfaces.MRC.DirectoryEntry;
-import org.xtreemfs.pbrpc.generatedinterfaces.OSD.readRequest;
-import org.xtreemfs.pbrpc.generatedinterfaces.OSD.truncateRequest;
-import org.xtreemfs.pbrpc.generatedinterfaces.OSD.writeRequest;
 
 public class TracingStage extends Stage {
 
@@ -67,12 +67,17 @@ public class TracingStage extends Stage {
 
     int                                         countedByte           = 0;
 
-    public TracingStage(OSDRequestDispatcher master, int maxRequestsQueueLength, int traceQCapacity) {
+    TracingPolicy                               tracingPolicy;
+
+    public TracingStage(OSDRequestDispatcher master, int maxRequestsQueueLength, int traceQCapacity,
+            TracingPolicy tracingPolicy) {
         super("OSD TraceStage", maxRequestsQueueLength);
         this.master = master;
 
         this.traceContainerQueue = new LinkedBlockingQueue<TraceContainer>();
         this.traceQCapacity = traceQCapacity;
+
+        this.tracingPolicy = tracingPolicy;
 
         userCredentials = buildUserCredentials("amokoma", "xtreemfs");
 
@@ -82,6 +87,7 @@ public class TracingStage extends Stage {
 
         try {
             client.start();
+
             boolean foundVolume = checkForVolume(client, traceLogVolumeName);
 
             if (!foundVolume) {
@@ -106,9 +112,22 @@ public class TracingStage extends Stage {
                 Logging.logMessage(Logging.LEVEL_INFO, Category.stage, this, "Dir not created");
             }
 
+        } catch (VolumeNotFoundException e) {
+            try {
+                client.createVolume("localhost", RPCAuthentication.authNone, userCredentials, traceLogVolumeName);
+            } catch (IOException e1) {
+                Logging.logError(Logging.LEVEL_ERROR, this, e1);
+            }
+            Logging.logMessage(Logging.LEVEL_INFO, Category.stage, this, "Volume created");
+        } catch (IOException e) {
+            Logging.logError(Logging.LEVEL_ERROR, this, e);
         } catch (Exception e) {
-            e.printStackTrace();
+            Logging.logError(Logging.LEVEL_ERROR, this, e);
         }
+    }
+
+    public TracingStage(OSDRequestDispatcher master, int maxRequestsQueueLength, int traceQCapacity) {
+        this(master, maxRequestsQueueLength, traceQCapacity, new NopTracingPolicyImpl());
 
     }
 
@@ -148,7 +167,7 @@ public class TracingStage extends Stage {
                 }
             }
         } catch (IOException e) {
-            e.printStackTrace();
+            Logging.logError(Logging.LEVEL_ERROR, this, e);
         }
         return foundDirectory;
 
@@ -173,19 +192,19 @@ public class TracingStage extends Stage {
 
         // Filter Operation
         if (op instanceof ReadOperation) {
-            log(stageRequest, Operation.ReadOperation);
+            logTrace(stageRequest, Operation.ReadOperation);
         }
         if (op instanceof WriteOperation) {
-            log(stageRequest, Operation.WriteOperation);
+            logTrace(stageRequest, Operation.WriteOperation);
         }
 
         if (op instanceof TruncateOperation) {
-            log(stageRequest, Operation.TruncateOperation);
+            logTrace(stageRequest, Operation.TruncateOperation);
         }
 
     }
 
-    public void log(StageRequest stageRequest, Operation op) {
+    public void logTrace(StageRequest stageRequest, Operation op) {
         TraceContainer tc = buildTraceContainer(stageRequest, op);
         try {
             if (this.traceContainerQueue.size() < this.traceQCapacity) {
@@ -198,7 +217,7 @@ public class TracingStage extends Stage {
                 Logging.logMessage(Logging.LEVEL_INFO, Category.stage, this, "Add a TraceContainer");
             }
         } catch (InterruptedException e) {
-            e.printStackTrace();
+            Logging.logError(Logging.LEVEL_ERROR, this, e);
         }
 
     }
@@ -227,7 +246,10 @@ public class TracingStage extends Stage {
         try {
             String pathToTraceLogFile = "/" + directoryName + "/" + traceLogFileName;
             boolean foundTraceLogFile = checkForTraceLogFile(v, userCredentials, directoryName, traceLogFileName);
-            String stringToWrite = getTraceLogMessage(traceContainerQueue);
+
+            TracingPolicyContainer container = new TracingPolicyContainer(getTraceLogMessage(traceContainerQueue));
+
+            String stringToWrite = tracingPolicy.compact(container).getTraceLogString();
             FileHandle fh = openTraceLogFile(foundTraceLogFile, userCredentials, pathToTraceLogFile);
 
             int w = fh.write(userCredentials, stringToWrite.getBytes(), stringToWrite.getBytes().length, countedByte);
@@ -240,9 +262,7 @@ public class TracingStage extends Stage {
             Logging.logMessage(Logging.LEVEL_INFO, Category.stage, this, "Bytes written: " + w);
 
         } catch (IOException e) {
-            e.printStackTrace();
-        } catch (Exception e) {
-            e.printStackTrace();
+            Logging.logError(Logging.LEVEL_ERROR, this, e);
         }
 
     }
@@ -257,7 +277,7 @@ public class TracingStage extends Stage {
                 }
             }
         } catch (IOException e) {
-            e.printStackTrace();
+            Logging.logError(Logging.LEVEL_ERROR, this, e);
         }
         return foundTraceLogFile;
     }
@@ -281,12 +301,8 @@ public class TracingStage extends Stage {
                     | SYSTEM_V_FCNTL.SYSTEM_V_FCNTL_H_O_RDWR.getNumber(), 0666) :
 
             v.openFile(userCredentials, pathToTraceLogFile, SYSTEM_V_FCNTL.SYSTEM_V_FCNTL_H_O_WRONLY.getNumber());
-        } catch (PosixErrorException e) {
-            e.printStackTrace();
-        } catch (AddressToUUIDNotFoundException e) {
-            e.printStackTrace();
         } catch (IOException e) {
-            e.printStackTrace();
+            Logging.logError(Logging.LEVEL_ERROR, this, e);
         }
         return fileHandle;
     }
@@ -295,8 +311,7 @@ public class TracingStage extends Stage {
     public void run() {
         notifyStarted();
 
-        timeToNextOFTclean = OFT_CLEAN_INTERVAL;
-        lastOFTcheck = TimeSync.getLocalSystemTime();
+        timeToNextOFTclean = OSDConfig.OFT_CLEAN_INTERVAL;
         while (!quit || q.size() > 0) {
             try {
                 StageRequest op = q.poll(timeToNextOFTclean, TimeUnit.MILLISECONDS);
@@ -307,7 +322,7 @@ public class TracingStage extends Stage {
 
                 processMethod(op);
             } catch (InterruptedException e) {
-                e.printStackTrace();
+                Logging.logError(Logging.LEVEL_ERROR, this, e);
             }
 
         }
@@ -315,152 +330,5 @@ public class TracingStage extends Stage {
         v.close();
         client.shutdown();
         notifyStopped();
-    }
-
-    public class TraceContainer {
-
-        public static final String ENTRYSEPERATOR = "#";
-
-        public OSDOperation        op;
-        /**
-         * Format : Time - Op - fileID - accessMode
-         */
-        public String              traceLogString;
-
-        public TraceContainer(StageRequest stageRequest, Operation op) {
-            OSDRequest osdRequest = (OSDRequest) stageRequest.getArgs()[0];
-            this.op = osdRequest.getOperation();
-
-            switch (op) {
-            case ReadOperation:
-                initForReadOperation(stageRequest);
-                break;
-            case WriteOperation:
-                initForWriteOperation(stageRequest);
-                break;
-            case TruncateOperation:
-                initForTruncateOperation(stageRequest);
-                break;
-            default:
-                this.traceLogString = TimeSync.getLocalSystemTime() + " - no more Informations";
-                break;
-            }
-        }
-
-        private String getTraceLogString(StageRequest stageRequest, Operation operation) {
-            String traceLogString = "";
-            switch (operation) {
-            case ReadOperation:
-                traceLogString = getTraceLogStringForRead(stageRequest);
-                break;
-            case WriteOperation:
-                traceLogString = getTraceLogStringForWrite(stageRequest);
-                break;
-            case TruncateOperation:
-                traceLogString = getTraceLogStringForTruncate(stageRequest);
-                break;
-            case Nop:
-                traceLogString = getTraceLogStringForNop(stageRequest);
-                break;
-            }
-            return traceLogString;
-        }
-
-        /**
-         * @return traceLogString in format : Time - Operation - fileID - accessMode - readLength - offset
-         */
-        private String getTraceLogStringForRead(StageRequest stageRequest) {
-            OSDRequest osdRequest = (OSDRequest) stageRequest.getArgs()[0];
-            readRequest readRequestArgs = (readRequest) osdRequest.getRequestArgs();
-
-            String fileID = osdRequest.getFileId();
-            String op = osdRequest.getOperation().getClass().getSimpleName();
-            int readLength = readRequestArgs.getLength();
-            int offset = readRequestArgs.getOffset();
-            int accessMode = osdRequest.getCapability().getAccessMode();
-
-            String traceLogString = TimeSync.getLocalSystemTime() + ENTRYSEPERATOR + op + ENTRYSEPERATOR + fileID
-                    + ENTRYSEPERATOR + accessMode + ENTRYSEPERATOR + readLength + ENTRYSEPERATOR + offset;
-
-            return traceLogString;
-        }
-
-        /**
-         * @return traceLogString in format : Time - Operation - fileID - accessMode - offset
-         */
-        private String getTraceLogStringForWrite(StageRequest stageRequest) {
-            OSDRequest osdRequest = (OSDRequest) stageRequest.getArgs()[0];
-            writeRequest writeRequestArgs = (writeRequest) osdRequest.getRequestArgs();
-
-            String fileID = osdRequest.getFileId();
-            String op = osdRequest.getOperation().getClass().getSimpleName();
-            int offset = writeRequestArgs.getOffset();
-            int accessMode = osdRequest.getCapability().getAccessMode();
-            String traceLogString = TimeSync.getLocalSystemTime() + ENTRYSEPERATOR + op + ENTRYSEPERATOR + fileID
-                    + ENTRYSEPERATOR + accessMode + ENTRYSEPERATOR + offset;
-            return traceLogString;
-        }
-
-        /**
-         * @param stageRequest
-         * @return traceLogString in format : Time - Operation - FileID - AccessMode - newFileSize
-         */
-        private String getTraceLogStringForTruncate(StageRequest stageRequest) {
-            OSDRequest osdRequest = (OSDRequest) stageRequest.getArgs()[0];
-            truncateRequest truncateRequestArgs = (truncateRequest) osdRequest.getRequestArgs();
-
-            String fileID = osdRequest.getFileId();
-            String op = osdRequest.getOperation().getClass().getSimpleName();
-            long newFileSize = truncateRequestArgs.getNewFileSize();
-            int accessMode = osdRequest.getCapability().getAccessMode();
-
-            String traceLogString = TimeSync.getLocalSystemTime() + ENTRYSEPERATOR + op + ENTRYSEPERATOR + fileID
-                    + ENTRYSEPERATOR + accessMode + ENTRYSEPERATOR + newFileSize;
-
-            return traceLogString;
-        }
-
-        /**
-         * @param stageRequest
-         * @return
-         */
-        private String getTraceLogStringForNop(StageRequest stageRequest) {
-
-            return TimeSync.getLocalSystemTime() + ENTRYSEPERATOR + " No more informations";
-        }
-
-        public void initForReadOperation(StageRequest stageRequest) {
-            this.traceLogString = getTraceLogString(stageRequest, Operation.ReadOperation);
-        }
-
-        public void initForWriteOperation(StageRequest stageRequest) {
-            this.traceLogString = getTraceLogString(stageRequest, Operation.WriteOperation);
-        }
-
-        public void initForTruncateOperation(StageRequest stageRequest) {
-
-            this.traceLogString = getTraceLogString(stageRequest, Operation.TruncateOperation);
-        }
-
-        public OSDOperation getOP() {
-            return op;
-        }
-
-        public String getLogString() {
-            return traceLogString;
-        }
-
-        public void setOp(OSDOperation op) {
-            this.op = op;
-        }
-
-        public void setLogString(String logString) {
-            this.traceLogString = logString;
-        }
-
-    }
-
-    public enum Operation {
-        ReadOperation, WriteOperation, TruncateOperation, Nop
     }
 }

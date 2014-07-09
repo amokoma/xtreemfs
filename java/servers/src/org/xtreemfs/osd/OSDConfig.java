@@ -90,6 +90,8 @@ public class OSDConfig extends ServiceConfig {
 
     public static final int           CHECKSUM_CRC32   = 2;
 
+    public final static long          OFT_CLEAN_INTERVAL = 1000 * 60;
+
     private final Map<String, String> customParams;
 
     /** Creates a new instance of OSDConfig */
