@@ -7,9 +7,9 @@
 package org.xtreemfs.osd.stages;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.TimeUnit;
 
 import org.xtreemfs.common.libxtreemfs.Client;
 import org.xtreemfs.common.libxtreemfs.ClientFactory;
@@ -27,11 +27,7 @@ import org.xtreemfs.osd.OSDRequest;
 import org.xtreemfs.osd.OSDRequestDispatcher;
 import org.xtreemfs.osd.TracingPolicy;
 import org.xtreemfs.osd.TracingPolicyContainer;
-import org.xtreemfs.osd.operations.OSDOperation;
-import org.xtreemfs.osd.operations.ReadOperation;
-import org.xtreemfs.osd.operations.TruncateOperation;
-import org.xtreemfs.osd.operations.WriteOperation;
-import org.xtreemfs.osd.stages.TraceContainer.Operation;
+import org.xtreemfs.osd.TracingThread;
 import org.xtreemfs.pbrpc.generatedinterfaces.GlobalTypes.SYSTEM_V_FCNTL;
 import org.xtreemfs.pbrpc.generatedinterfaces.MRC.DirectoryEntry;
 
@@ -69,7 +65,10 @@ public class TracingStage extends Stage {
 
     TracingPolicy                               tracingPolicy;
 
-    public TracingStage(OSDRequestDispatcher master, int maxRequestsQueueLength, int traceQCapacity,
+    TracingThread[]                             tracingThreads;
+    int                                         numOfThreads;
+
+    public TracingStage(OSDRequestDispatcher master, int maxRequestsQueueLength, int traceQCapacity, int numOfThreads,
             TracingPolicy tracingPolicy) {
         super("OSD TraceStage", maxRequestsQueueLength);
         this.master = master;
@@ -79,15 +78,114 @@ public class TracingStage extends Stage {
 
         this.tracingPolicy = tracingPolicy;
 
-        userCredentials = buildUserCredentials("amokoma", "xtreemfs");
 
-        xtreemfsoptions = createXtreemfsOptions();
+        int defaultNumberOfThreads = 4;
+        if(numOfThreads <= 0){
+            numOfThreads = defaultNumberOfThreads;
+        }
 
-        this.client = ClientFactory.createClient("localhost", userCredentials, null, xtreemfsoptions);
+        setupTracingThreads(master, maxRequestsQueueLength, numOfThreads);
+    }
 
+    /**
+     * @param master
+     * @param maxRequestsQueueLength
+     * @param numOfThreads
+     */
+    private void setupTracingThreads(OSDRequestDispatcher master, int maxRequestsQueueLength, int numOfThreads) {
+        tracingThreads = new TracingThread[numOfThreads];
+        for (int i = 0; i < numOfThreads; i++) {
+            tracingThreads[i] = new TracingThread(i, master, maxRequestsQueueLength, traceContainerQueue, this.q, this);
+            tracingThreads[i].setLifeCycleListener(master);
+            tracingThreads[i].start();
+        }
+    }
+
+    public TracingStage(OSDRequestDispatcher master, int maxRequestsQueueLength, int traceQCapacity, int numOfThreads) {
+        this(master, maxRequestsQueueLength, traceQCapacity, numOfThreads, new NopTracingPolicyImpl());
+
+    }
+
+
+
+    public void prepareRequest(OSDRequest request) {
+        // Check if the request should be traced
+        if (request.getCapability().getXCap().getTraceConfig().getTraceRequests() || true) { // TODO remove || true
+            this.enqueueOperation(0, new Object[] { request }, null, null);
+
+        }
+    }
+
+    /*
+     * (non-Javadoc)
+     * 
+     * @see org.xtreemfs.osd.stages.Stage#processMethod(org.xtreemfs.osd.stages.Stage .StageRequest)
+     */
+    @Override
+    protected void processMethod(StageRequest stageRequest) {
+        throw new UnsupportedOperationException("Not supported yet.");
+    }
+
+    /**
+     * Write the tracelog in a file via the xtreemfs libary
+     * 
+     * @param directoryName
+     *            name of the directory
+     * @param traceLogFileName
+     *            name of the trace log file
+     */
+    public void writeTraceLogLibXtreemFS(String directoryName, String traceLogFileName) {
         try {
-            client.start();
 
+            prepareClient();
+            prepareVolume();
+
+            String pathToTraceLogFile = "/" + directoryName + "/" + traceLogFileName;
+            boolean foundTraceLogFile = checkForTraceLogFile(v, userCredentials, directoryName, traceLogFileName);
+
+            TracingPolicyContainer container = new TracingPolicyContainer(getTraceLogMessage(traceContainerQueue));
+
+            ArrayList<Object> list = new ArrayList<>();
+            list.add(getTraceLogMessage(traceContainerQueue));
+
+            String stringToWrite = (String) tracingPolicy.compact(list).get(0); // TODO change cast
+            FileHandle fh = openTraceLogFile(foundTraceLogFile, userCredentials, pathToTraceLogFile);
+
+            int w = fh.write(userCredentials, stringToWrite.getBytes(), stringToWrite.getBytes().length,
+                    countedByte);
+
+            countedByte += w;
+
+            fh.flush();
+            fh.close();
+
+            Logging.logMessage(Logging.LEVEL_INFO, Category.stage, this, "Bytes written: " + w);
+
+            closeVolume();
+            shutdownClient();
+
+        } catch (IOException e) {
+            Logging.logError(Logging.LEVEL_ERROR, this, e);
+        }
+
+    }
+
+    private void prepareClient() {
+        xtreemfsoptions = createXtreemfsOptions();
+        userCredentials = buildUserCredentials("amokoma", "xtreemfs"); // TODO flexibler
+        this.client = ClientFactory.createClient("localhost", userCredentials, null, xtreemfsoptions);
+        try {
+            this.client.start();
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * 
+     */
+    private void prepareVolume() {
+        try {
             boolean foundVolume = checkForVolume(client, traceLogVolumeName);
 
             if (!foundVolume) {
@@ -102,6 +200,7 @@ public class TracingStage extends Stage {
 
             // Volume erstellt mit -a NULL
             v = client.openVolume(traceLogVolumeName, null, xtreemfsoptions);
+
             // v.start();
             boolean foundDir = checkForDirectory(v, userCredentials, traceLogDirectoryName);
 
@@ -115,19 +214,16 @@ public class TracingStage extends Stage {
         } catch (VolumeNotFoundException e) {
             try {
                 client.createVolume("localhost", RPCAuthentication.authNone, userCredentials, traceLogVolumeName);
+
             } catch (IOException e1) {
-                Logging.logError(Logging.LEVEL_ERROR, this, e1);
+                e1.printStackTrace();
             }
             Logging.logMessage(Logging.LEVEL_INFO, Category.stage, this, "Volume created");
+
         } catch (IOException e) {
             Logging.logError(Logging.LEVEL_ERROR, this, e);
-        } catch (Exception e) {
-            Logging.logError(Logging.LEVEL_ERROR, this, e);
-        }
-    }
 
-    public TracingStage(OSDRequestDispatcher master, int maxRequestsQueueLength, int traceQCapacity) {
-        this(master, maxRequestsQueueLength, traceQCapacity, new NopTracingPolicyImpl());
+        }
 
     }
 
@@ -173,97 +269,18 @@ public class TracingStage extends Stage {
 
     }
 
-    public void prepareRequest(OSDRequest request) {
-        // Check if the request should be traced
-        if (request.getCapability().getXCap().getTraceConfig().getTraceRequests()) {
-            this.enqueueOperation(0, new Object[] { request }, null, null);
-        }
-    }
-
-    /*
-     * (non-Javadoc)
+    /**
      * 
-     * @see org.xtreemfs.osd.stages.Stage#processMethod(org.xtreemfs.osd.stages.Stage .StageRequest)
      */
-    @Override
-    protected void processMethod(StageRequest stageRequest) {
-        OSDRequest rq = (OSDRequest) stageRequest.getArgs()[0];
-        OSDOperation op = rq.getOperation();
-
-        // Filter Operation
-        if (op instanceof ReadOperation) {
-            logTrace(stageRequest, Operation.ReadOperation);
-        }
-        if (op instanceof WriteOperation) {
-            logTrace(stageRequest, Operation.WriteOperation);
-        }
-
-        if (op instanceof TruncateOperation) {
-            logTrace(stageRequest, Operation.TruncateOperation);
-        }
-
+    private void shutdownClient() {
+        this.client.shutdown();
     }
 
-    public void logTrace(StageRequest stageRequest, Operation op) {
-        TraceContainer tc = buildTraceContainer(stageRequest, op);
-        try {
-            if (this.traceContainerQueue.size() < this.traceQCapacity) {
-                this.traceContainerQueue.put(tc);
-                Logging.logMessage(Logging.LEVEL_INFO, Category.stage, this, "Add a TraceContainer");
-            } else {
-                writeTraceLogLibXtreemFS(userCredentials, xtreemfsoptions, traceLogDirectoryName, traceLogFileName);
-                this.traceContainerQueue.clear();
-                this.traceContainerQueue.put(tc);
-                Logging.logMessage(Logging.LEVEL_INFO, Category.stage, this, "Add a TraceContainer");
-            }
-        } catch (InterruptedException e) {
-            Logging.logError(Logging.LEVEL_ERROR, this, e);
-        }
-
-    }
-
-    private TraceContainer buildTraceContainer(StageRequest stageRequest, Operation op) {
-        TraceContainer tc;
-        switch (op) {
-        case ReadOperation: // 0 Read
-            tc = new TraceContainer(stageRequest, Operation.ReadOperation);
-            break;
-        case WriteOperation: // 1 Write
-            tc = new TraceContainer(stageRequest, Operation.WriteOperation);
-            break;
-        case TruncateOperation: // 2 Truncate
-            tc = new TraceContainer(stageRequest, Operation.TruncateOperation);
-            break;
-        default:
-            tc = new TraceContainer(stageRequest, Operation.Nop);
-            break;
-        }
-        return tc;
-    }
-
-    public void writeTraceLogLibXtreemFS(UserCredentials userCredentials, Options xtreemfsoptions,
-            String directoryName, String traceLogFileName) {
-        try {
-            String pathToTraceLogFile = "/" + directoryName + "/" + traceLogFileName;
-            boolean foundTraceLogFile = checkForTraceLogFile(v, userCredentials, directoryName, traceLogFileName);
-
-            TracingPolicyContainer container = new TracingPolicyContainer(getTraceLogMessage(traceContainerQueue));
-
-            String stringToWrite = tracingPolicy.compact(container).getTraceLogString();
-            FileHandle fh = openTraceLogFile(foundTraceLogFile, userCredentials, pathToTraceLogFile);
-
-            int w = fh.write(userCredentials, stringToWrite.getBytes(), stringToWrite.getBytes().length, countedByte);
-
-            countedByte += w;
-
-            fh.flush();
-            fh.close();
-
-            Logging.logMessage(Logging.LEVEL_INFO, Category.stage, this, "Bytes written: " + w);
-
-        } catch (IOException e) {
-            Logging.logError(Logging.LEVEL_ERROR, this, e);
-        }
+    /**
+     * 
+     */
+    private void closeVolume() {
+        v.close();
 
     }
 
@@ -295,12 +312,13 @@ public class TracingStage extends Stage {
             String pathToTraceLogFile) {
         FileHandle fileHandle = null;
         try {
-            fileHandle = !foundTraceLogFile ?
+            fileHandle = !foundTraceLogFile ? v.openFile(
+                    userCredentials,
+                    pathToTraceLogFile,
+                    SYSTEM_V_FCNTL.SYSTEM_V_FCNTL_H_O_CREAT.getNumber()
+                    | SYSTEM_V_FCNTL.SYSTEM_V_FCNTL_H_O_RDWR.getNumber(), 0666) : v.openFile(userCredentials,
+                    pathToTraceLogFile, SYSTEM_V_FCNTL.SYSTEM_V_FCNTL_H_O_WRONLY.getNumber());
 
-            v.openFile(userCredentials, pathToTraceLogFile, SYSTEM_V_FCNTL.SYSTEM_V_FCNTL_H_O_CREAT.getNumber()
-                    | SYSTEM_V_FCNTL.SYSTEM_V_FCNTL_H_O_RDWR.getNumber(), 0666) :
-
-            v.openFile(userCredentials, pathToTraceLogFile, SYSTEM_V_FCNTL.SYSTEM_V_FCNTL_H_O_WRONLY.getNumber());
         } catch (IOException e) {
             Logging.logError(Logging.LEVEL_ERROR, this, e);
         }
@@ -314,21 +332,28 @@ public class TracingStage extends Stage {
         timeToNextOFTclean = OSDConfig.OFT_CLEAN_INTERVAL;
         while (!quit || q.size() > 0) {
             try {
-                StageRequest op = q.poll(timeToNextOFTclean, TimeUnit.MILLISECONDS);
-
-                if (op == null) {
-                    continue;
-                }
-
-                processMethod(op);
+                sleep(timeToNextOFTclean);
             } catch (InterruptedException e) {
-                Logging.logError(Logging.LEVEL_ERROR, this, e);
+                e.printStackTrace();
             }
 
-        }
+            StageRequest request = q.peek();
 
-        v.close();
-        client.shutdown();
+            if (request == null) {
+
+                if (!traceContainerQueue.isEmpty()) {
+
+
+                    writeTraceLogLibXtreemFS(traceLogDirectoryName, traceLogFileName);
+
+                    Logging.logMessage(Logging.LEVEL_INFO, Category.stage, this, "Wrote trace");
+                    this.traceContainerQueue.clear();
+                }
+
+                continue;
+            }
+        }
         notifyStopped();
     }
+
 }

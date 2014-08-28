@@ -341,7 +341,7 @@ public class OSDRequestDispatcher implements RPCServerRequestListener, LifeCycle
         rwrStage.setLifeCycleListener(this);
 
         // TODO TEST
-        traceStage = new TracingStage(this, config.getMaxRequestsQueueLength(), config.getOSDTracingQCapacity());
+        traceStage = new TracingStage(this, config.getMaxRequestsQueueLength(), config.getOSDTracingQCapacity(), 4);
         traceStage.setLifeCycleListener(this);
 
         // ----------------------------------------
