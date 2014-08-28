@@ -6,10 +6,18 @@
  */
 package org.xtreemfs.osd;
 
+import java.util.List;
+
+import org.xtreemfs.osd.operations.OSDOperation;
+import org.xtreemfs.osd.stages.Stage.StageRequest;
+
 public interface TracingPolicy {
 
-    public TracingPolicyContainer compact(TracingPolicyContainer container);
+    public List<Object> compact(List<Object> container); // TODO change Object
 
-    public void extract();
+    // TODO change return value
+    public Object extract(StageRequest request, OSDOperation operation);
+
+    public byte[] toByteArray();
 
 }
