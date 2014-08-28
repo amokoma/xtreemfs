@@ -68,7 +68,7 @@ public class TraceContainer {
     }
 
     /**
-     * @return traceLogString in format : Time - Operation - fileID - accessMode - readLength - offset
+     * @return traceLogString in format : Time - Operation - fileID - readLength - offset
      */
     private String getTraceLogStringForRead(StageRequest stageRequest) {
         OSDRequest osdRequest = (OSDRequest) stageRequest.getArgs()[0];
@@ -76,12 +76,11 @@ public class TraceContainer {
 
         String fileID = osdRequest.getFileId();
         String op = osdRequest.getOperation().getClass().getSimpleName();
-        int readLength = readRequestArgs.getLength();
-        int offset = readRequestArgs.getOffset();
-        int accessMode = osdRequest.getCapability().getAccessMode();
+         int readLength = readRequestArgs.getLength();
+         int offset = readRequestArgs.getOffset();
 
         String traceLogString = TimeSync.getLocalSystemTime() + ENTRYSEPERATOR + op + ENTRYSEPERATOR + fileID
-                + ENTRYSEPERATOR + accessMode + ENTRYSEPERATOR + readLength + ENTRYSEPERATOR + offset;
+                + ENTRYSEPERATOR + readLength + ENTRYSEPERATOR + offset;
 
         return traceLogString;
     }
@@ -96,9 +95,9 @@ public class TraceContainer {
         String fileID = osdRequest.getFileId();
         String op = osdRequest.getOperation().getClass().getSimpleName();
         int offset = writeRequestArgs.getOffset();
-        int accessMode = osdRequest.getCapability().getAccessMode();
+
         String traceLogString = TimeSync.getLocalSystemTime() + ENTRYSEPERATOR + op + ENTRYSEPERATOR + fileID
-                + ENTRYSEPERATOR + accessMode + ENTRYSEPERATOR + offset;
+                + ENTRYSEPERATOR + offset;
         return traceLogString;
     }
 
