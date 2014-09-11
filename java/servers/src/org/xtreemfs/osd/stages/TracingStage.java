@@ -331,11 +331,11 @@ public class TracingStage extends Stage {
 
         timeToNextOFTclean = OSDConfig.OFT_CLEAN_INTERVAL;
         while (!quit || q.size() > 0) {
-            try {
-                sleep(timeToNextOFTclean);
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            }
+            // try {
+            // sleep(timeToNextOFTclean);
+            // } catch (InterruptedException e) {
+            // e.printStackTrace();
+            // }
 
             StageRequest request = q.peek();
 
