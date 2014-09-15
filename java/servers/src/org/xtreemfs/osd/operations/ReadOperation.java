@@ -94,6 +94,8 @@ public final class ReadOperation extends OSDOperation {
                 @Override
                 public void readComplete(ObjectInformation result, ErrorResponse error) {
                     postRead(rq, args, result, error);
+                            // TOOO TEST
+                            master.getTracingStage2().prepareRequest(rq);
                 }
             });
         } else {

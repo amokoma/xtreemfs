@@ -90,6 +90,8 @@ public final class WriteOperation extends OSDOperation {
                             @Override
                             public void writeComplete(OSDWriteResponse result, ErrorResponse error) {
                                 sendResult(rq, result, error);
+                                // TODO TEST
+                                master.getTracingStage2().prepareRequest(rq);
                             }
                         });
             } else {

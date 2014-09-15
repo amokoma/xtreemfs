@@ -81,6 +81,8 @@ public final class TruncateOperation extends OSDOperation {
                     @Override
                     public void truncateComplete(OSDWriteResponse result, ErrorResponse error) {
                         step2(rq, args, result, error);
+                            // TODO TEST
+                            master.getTracingStage2().prepareRequest(rq);
                     }
             });
         } else {
