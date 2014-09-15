@@ -6,6 +6,10 @@
  */
 package org.xtreemfs.osd.stages;
 
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
+
+import org.xtreemfs.foundation.TimeSync;
 import org.xtreemfs.foundation.logging.Logging;
 import org.xtreemfs.foundation.logging.Logging.Category;
 import org.xtreemfs.osd.OSDRequest;
@@ -14,12 +18,16 @@ import org.xtreemfs.osd.operations.OSDOperation;
 import org.xtreemfs.osd.operations.ReadOperation;
 import org.xtreemfs.osd.operations.TruncateOperation;
 import org.xtreemfs.osd.operations.WriteOperation;
+import org.xtreemfs.pbrpc.generatedinterfaces.OSD.readRequest;
+import org.xtreemfs.pbrpc.generatedinterfaces.OSD.truncateRequest;
+import org.xtreemfs.pbrpc.generatedinterfaces.OSD.writeRequest;
 
 /** TODO: Brief description of the purpose of this type and its relation to other types. */
 public class TracingStage2 extends Stage {
 
     private final OSDRequestDispatcher master;
     private final int                  queueCapacity;
+    private final BlockingQueue<TraceContainer> traceContainerQueue;
     /**
      * @param stageName
      * @param queueCapacity
@@ -29,6 +37,7 @@ public class TracingStage2 extends Stage {
         this.master = master;
         this.queueCapacity = queueCapacity;
         Logging.logMessage(Logging.LEVEL_INFO, Category.stage, this, "Tracing stage 2");
+        traceContainerQueue = new LinkedBlockingQueue<TraceContainer>();
     }
 
     /* (non-Javadoc)
@@ -46,16 +55,47 @@ public class TracingStage2 extends Stage {
 
         if (op instanceof ReadOperation) {
             Logging.logMessage(Logging.LEVEL_INFO, Category.stage, this, "###########ReadOperation###########");
+            createContainerRead(rq);
         } else {
             if (op instanceof WriteOperation) {
                 Logging.logMessage(Logging.LEVEL_INFO, Category.stage, this, "###########WriteOperation###########");
+                createContainerWrite(rq);
             } else {
                 if (op instanceof TruncateOperation) {
                     Logging.logMessage(Logging.LEVEL_INFO, Category.stage, this,
                             "###########TruncateOperation###########");
+                    createContainerTruncate(rq);
                 }
             }
         }
+    }
+
+    private void createContainerRead(OSDRequest rq) {
+        readRequest args = (readRequest) rq.getRequestArgs();
+        String fileID = args.getFileId();
+        int offset = args.getOffset();
+        int length = args.getLength();
+        
+        String traceString = TimeSync.getLocalSystemTime() + "#" + fileID + "#" + length + "#" + offset;
+        Logging.logMessage(Logging.LEVEL_INFO, Category.stage, this, traceString);
+    }
+
+    private void createContainerWrite(OSDRequest rq) {
+        writeRequest args = (writeRequest) rq.getRequestArgs();
+        String fileID = args.getFileId();
+        int offset = args.getOffset();
+        int length = rq.getRPCRequest().getData().getData().length;
+
+        String traceString = TimeSync.getLocalSystemTime() + "#" + fileID + "#" + length + "#" + offset;
+        Logging.logMessage(Logging.LEVEL_INFO, Category.stage, this, traceString);
+    }
+
+    private void createContainerTruncate(OSDRequest rq) {
+        truncateRequest args = (truncateRequest) rq.getRequestArgs();
+        String fileID = args.getFileId();
+        long newSize = args.getNewFileSize();
+        String traceString = TimeSync.getLocalSystemTime() + "#" + fileID + "#" + newSize;
+        Logging.logMessage(Logging.LEVEL_INFO, Category.stage, this, traceString);
     }
 
 }
