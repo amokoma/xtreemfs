@@ -102,6 +102,7 @@ import org.xtreemfs.osd.stages.PreprocStage;
 import org.xtreemfs.osd.stages.ReplicationStage;
 import org.xtreemfs.osd.stages.StorageStage;
 import org.xtreemfs.osd.stages.TracingStage;
+import org.xtreemfs.osd.stages.TracingStage2;
 import org.xtreemfs.osd.stages.VivaldiStage;
 import org.xtreemfs.osd.storage.CleanupThread;
 import org.xtreemfs.osd.storage.CleanupVersionsThread;
@@ -186,6 +187,9 @@ public class OSDRequestDispatcher implements RPCServerRequestListener, LifeCycle
 
     // TODO TEST
     private final TracingStage                          traceStage;
+
+    // TODO TEST
+    private final TracingStage2                         tracingStage2;
 
     /**
      * reachability of services
@@ -343,6 +347,10 @@ public class OSDRequestDispatcher implements RPCServerRequestListener, LifeCycle
         // TODO TEST
         traceStage = new TracingStage(this, config.getMaxRequestsQueueLength(), config.getOSDTracingQCapacity(), 1);
         traceStage.setLifeCycleListener(this);
+
+        // TODO TEST
+        tracingStage2 = new TracingStage2(this, "TracingStage2", config.getMaxRequestsQueueLength());
+        tracingStage2.setLifeCycleListener(this);
 
         // ----------------------------------------
         // initialize TimeSync and Heartbeat thread
@@ -509,6 +517,8 @@ public class OSDRequestDispatcher implements RPCServerRequestListener, LifeCycle
             // TODO TEST
             traceStage.start();
             traceStage.waitForStartup();
+            tracingStage2.start();
+            tracingStage2.waitForStartup();
 
             udpCom.waitForStartup();
             preprocStage.waitForStartup();
@@ -572,6 +582,8 @@ public class OSDRequestDispatcher implements RPCServerRequestListener, LifeCycle
             // TODO TEST
             traceStage.shutdown();
             traceStage.waitForShutdown();
+            tracingStage2.shutdown();
+            tracingStage2.waitForShutdown();
 
             udpCom.waitForShutdown();
             preprocStage.waitForShutdown();
@@ -626,6 +638,7 @@ public class OSDRequestDispatcher implements RPCServerRequestListener, LifeCycle
 
             // TODO TEST
             traceStage.shutdown();
+            tracingStage2.shutdown();
 
             if (Logging.isInfo())
                 Logging.logMessage(Logging.LEVEL_INFO, Category.lifecycle, this, "OSD and all stages terminated");
@@ -739,7 +752,8 @@ public class OSDRequestDispatcher implements RPCServerRequestListener, LifeCycle
                 @Override
                 public void parseComplete(OSDRequest result, ErrorResponse error) {
                     if (error == null) {
-                        traceStage.prepareRequest(result);
+                        // TODO TEST
+                        // traceStage.prepareRequest(result);
                         result.getOperation().startRequest(result);
                     } else {
                         result.getRPCRequest().sendError(error);
@@ -896,6 +910,10 @@ public class OSDRequestDispatcher implements RPCServerRequestListener, LifeCycle
     // TODO TEST
     public TracingStage getTraceStage() {
         return traceStage;
+    }
+
+    public TracingStage2 getTracingStage2() {
+        return tracingStage2;
     }
 
     public void sendUDPMessage(RPCHeader header, Message message, InetSocketAddress receiver) throws IOException {
