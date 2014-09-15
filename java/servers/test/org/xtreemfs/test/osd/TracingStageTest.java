@@ -99,12 +99,12 @@ public class TracingStageTest {
                         | SYSTEM_V_FCNTL.SYSTEM_V_FCNTL_H_O_SYNC.getNumber());
 
         
-        String data = "Hello";
-        for (int i = 0; i < 1000; i++) {
-            data += "Hello";
-        }
-        
-        byte[] array = new byte[10000000];
+        // String data = "Hello";
+        // for (int i = 0; i < 1000; i++) {
+        // data += "Hello";
+        // }
+        //
+        byte[] array = new byte[1000];
         for (int i = 0; i < array.length; i++) {
             array[i] = 1;
         }
