@@ -14,6 +14,7 @@ import org.xtreemfs.common.uuids.ServiceUUID;
 import org.xtreemfs.common.xloc.InvalidXLocationsException;
 import org.xtreemfs.common.xloc.StripingPolicyImpl;
 import org.xtreemfs.common.xloc.XLocations;
+import org.xtreemfs.foundation.TimeSync;
 import org.xtreemfs.foundation.buffer.ReusableBuffer;
 import org.xtreemfs.foundation.pbrpc.generatedinterfaces.RPC.ErrorType;
 import org.xtreemfs.foundation.pbrpc.generatedinterfaces.RPC.POSIXErrno;
@@ -83,15 +84,19 @@ public final class WriteOperation extends OSDOperation {
                || (rq.getLocationList().getNumReplicas() == 1) ){
 
                 ReusableBuffer viewBuffer = rq.getRPCRequest().getData().createViewBuffer();
+                final long startTime = TimeSync.getLocalSystemTime();
+
                 master.getStorageStage().writeObject(args.getFileId(), args.getObjectNumber(), sp,
                         args.getOffset(), viewBuffer, rq.getCowPolicy(),
                         rq.getLocationList(), syncWrite, null, rq, viewBuffer, new WriteObjectCallback() {
 
                             @Override
                             public void writeComplete(OSDWriteResponse result, ErrorResponse error) {
+                                long endTime = TimeSync.getLocalSystemTime();
                                 sendResult(rq, result, error);
                                 // TODO TEST
-                                master.getTracingStage2().prepareRequest(rq);
+                                long totalTime = endTime - startTime;
+                                master.getTracingStage2().prepareRequest(new Object[] { rq, totalTime });
                             }
                         });
             } else {

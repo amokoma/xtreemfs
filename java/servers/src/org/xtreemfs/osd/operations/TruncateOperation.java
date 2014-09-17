@@ -17,6 +17,7 @@ import org.xtreemfs.common.uuids.ServiceUUID;
 import org.xtreemfs.common.xloc.InvalidXLocationsException;
 import org.xtreemfs.common.xloc.StripingPolicyImpl;
 import org.xtreemfs.common.xloc.XLocations;
+import org.xtreemfs.foundation.TimeSync;
 import org.xtreemfs.foundation.logging.Logging;
 import org.xtreemfs.foundation.pbrpc.client.RPCAuthentication;
 import org.xtreemfs.foundation.pbrpc.client.RPCResponse;
@@ -70,20 +71,22 @@ public final class TruncateOperation extends OSDOperation {
         }
 
         if ((rq.getLocationList().getReplicaUpdatePolicy().length() == 0)
-            || (rq.getLocationList().getNumReplicas() == 1)) {
+                || (rq.getLocationList().getNumReplicas() == 1)) {
+
+            final long startTime = TimeSync.getLocalSystemTime();
 
             master.getStorageStage().truncate(args.getFileId(), args.getNewFileSize(),
-                rq.getLocationList().getLocalReplica().getStripingPolicy(),
-                rq.getLocationList().getLocalReplica(), rq.getCapability().getEpochNo(), rq.getCowPolicy(),
-                null, false, rq,
-                new TruncateCallback() {
+                    rq.getLocationList().getLocalReplica().getStripingPolicy(), rq.getLocationList().getLocalReplica(),
+                    rq.getCapability().getEpochNo(), rq.getCowPolicy(), null, false, rq, new TruncateCallback() {
 
-                    @Override
-                    public void truncateComplete(OSDWriteResponse result, ErrorResponse error) {
-                        step2(rq, args, result, error);
+                        @Override
+                        public void truncateComplete(OSDWriteResponse result, ErrorResponse error) {
+                            long endTime = TimeSync.getLocalSystemTime();
+                            step2(rq, args, result, error);
                             // TODO TEST
-                            master.getTracingStage2().prepareRequest(rq);
-                    }
+                            long totalTime = endTime - startTime;
+                            master.getTracingStage2().prepareRequest(new Object[] { rq, totalTime });
+                        }
             });
         } else {
             rwReplicatedTruncate(rq, args);
@@ -99,10 +102,10 @@ public final class TruncateOperation extends OSDOperation {
                 final StripingPolicyImpl sp = rq.getLocationList().getLocalReplica().getStripingPolicy();
 
                 //FIXME: ignore canExecOperation for now...
-               master.getStorageStage().truncate(args.getFileId(), args.getNewFileSize(),
-                    rq.getLocationList().getLocalReplica().getStripingPolicy(),
-                    rq.getLocationList().getLocalReplica(), rq.getCapability().getEpochNo(), rq.getCowPolicy(),
-                    newObjectVersion, true, rq, new TruncateCallback() {
+                        master.getStorageStage().truncate(args.getFileId(), args.getNewFileSize(),
+                                rq.getLocationList().getLocalReplica().getStripingPolicy(),
+                                rq.getLocationList().getLocalReplica(), rq.getCapability().getEpochNo(),
+                                rq.getCowPolicy(), newObjectVersion, true, rq, new TruncateCallback() {
 
                     @Override
                     public void truncateComplete(OSDWriteResponse result, ErrorResponse error) {
@@ -127,30 +130,30 @@ public final class TruncateOperation extends OSDOperation {
             final long newObjVersion,
             final truncateRequest args,
             final OSDWriteResponse result, ErrorResponse error) {
-            if (error != null)
-                step2(rq, args, result, error);
-            else {
-                master.getRWReplicationStage().replicateTruncate(args.getFileCredentials(),
+        if (error != null)
+            step2(rq, args, result, error);
+        else {
+            master.getRWReplicationStage().replicateTruncate(args.getFileCredentials(),
                     rq.getLocationList(),args.getNewFileSize(), newObjVersion,
                     new RWReplicationStage.RWReplicationCallback() {
 
-                    @Override
-                    public void success(long newObjectVersion) {
-                        step2(rq, args, result, null);
-                    }
+                        @Override
+                        public void success(long newObjectVersion) {
+                            step2(rq, args, result, null);
+                        }
 
-                    @Override
-                    public void redirect(String redirectTo) {
-                        rq.getRPCRequest().sendRedirect(redirectTo);
-                    }
+                        @Override
+                        public void redirect(String redirectTo) {
+                            rq.getRPCRequest().sendRedirect(redirectTo);
+                        }
 
-                    @Override
-                    public void failed(ErrorResponse err) {
-                        rq.sendError(err);
-                    }
-                }, rq);
+                        @Override
+                        public void failed(ErrorResponse err) {
+                            rq.sendError(err);
+                        }
+                    }, rq);
 
-            }
+        }
     }
 
     public void step2(final OSDRequest rq,

@@ -17,6 +17,7 @@ import org.xtreemfs.common.uuids.ServiceUUID;
 import org.xtreemfs.common.xloc.InvalidXLocationsException;
 import org.xtreemfs.common.xloc.StripingPolicyImpl;
 import org.xtreemfs.common.xloc.XLocations;
+import org.xtreemfs.foundation.TimeSync;
 import org.xtreemfs.foundation.buffer.BufferPool;
 import org.xtreemfs.foundation.logging.Logging;
 import org.xtreemfs.foundation.logging.Logging.Category;
@@ -88,14 +89,19 @@ public final class ReadOperation extends OSDOperation {
 
             final long snapVerTS = rq.getCapability().getSnapConfig() == SnapConfig.SNAP_CONFIG_ACCESS_SNAP? rq.getCapability().getSnapTimestamp(): 0;
 
+            final long startTime = TimeSync.getLocalSystemTime();
+
             master.getStorageStage().readObject(args.getFileId(), args.getObjectNumber(), sp,
                 args.getOffset(),args.getLength(), snapVerTS, rq, new ReadObjectCallback() {
 
                 @Override
                 public void readComplete(ObjectInformation result, ErrorResponse error) {
-                    postRead(rq, args, result, error);
+                            long endTime = TimeSync.getLocalSystemTime();
+                            postRead(rq, args, result, error);
                             // TOOO TEST
-                            master.getTracingStage2().prepareRequest(rq);
+                            long totalTime = endTime - startTime;
+                            master.getTracingStage2().prepareRequest(new Object[] { rq, totalTime });
+                           
                 }
             });
         } else {
