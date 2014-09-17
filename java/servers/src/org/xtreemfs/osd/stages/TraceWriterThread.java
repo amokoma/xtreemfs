@@ -82,25 +82,22 @@ public class TraceWriterThread extends Stage {
             try {
                 container = traceContainerQueue.poll(6000, TimeUnit.MILLISECONDS);
 
-                System.out.println("TraceWriterThread");
-                synchronized (traceContainerList) {
 
                     if (container != null) {
                         if (traceContainerList.size() < maxContainer) {
                             traceContainerList.add(container);
                         } else {
-                            writeTraceLogLibXtreemFS(traceLogDirectoryName, traceLogFileName);
-                            traceContainerList.clear();
-                            traceContainerList.add(container);
-                            // write trace
-                            // clear containerlist
-                            // add Container
+                                writeTraceLogLibXtreemFS(traceLogDirectoryName, traceLogFileName);
+                                traceContainerList.clear();
+                                traceContainerList.add(container);
+                                // write trace
+                                // clear containerlist
+                                // add Container
                         }
                     } else {
                         continue;
                     }
 
-                }
 
             } catch (InterruptedException e) {
                 // TODO Auto-generated catch block
@@ -109,7 +106,7 @@ public class TraceWriterThread extends Stage {
 
         }
     }
-    
+
     public String buildTraceString() {
         String result = "";
 
